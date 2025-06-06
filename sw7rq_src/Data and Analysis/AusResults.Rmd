@@ -1,0 +1,701 @@
+---
+title: "Australia Tracking Paper Results - Public"
+author: "Paul M. Garrett"
+date: "27/09/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE, scipen=999999}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+shell('cls'); rm(list=ls())
+select <- dplyr::select
+# For BayesianFirstAid, download developer tools, JAGs for sampling, and then the package from git.
+# Developer tools: install.packages("devtools")
+# JAGs: https://sourceforge.net/projects/mcmc-jags/files/latest/download
+# BayesianFirstAid: devtools::install_github("rasmusab/bayesian_first_aid")
+
+# Load custom functions
+source('Functions.R')
+
+# Load packages via require: if any are missing, this will not error out but will be a problem later in the script. 
+lapply(c('tidyverse','expss','summarytools','ggplot2','rio','survey', 'parsedate','reshape2','scales', 'knitr','gridExtra','MCMCpack','dplyr','MCMCpack','ggsignif','ggpubr', 'BayesianFirstAid','tidybayes'),
+       require, character.only = TRUE)
+
+knitr::opts_chunk$set(echo = FALSE, warnings = FALSE, message = FALSE)
+
+load('AustCOVIDdata_public.RData')
+
+```
+
+```{r, fig.width = 10, fig.height= 5}
+# FIGURE 1: COVID Cases, Deaths, and Key Dates
+
+NOW = as.Date('2020-07-15')
+START = as.Date( '2020-01-22' )
+
+Aus = WorldCOVIDdata('Australia',
+                    StartDate = START, EndDate = NOW) %>%  
+  select(cases, deaths, date, country) %>% 
+  melt(id = c('date','country'))
+
+# Allocated Data to dataframes for Key dates, Waves, and Australian Cases & Deaths.
+Dates = data.frame( date = as.Date( c("2020-01-25", "2020-02-27", 
+                                      "2020-03-13", "2020-03-16",
+                                      "2020-03-21", "2020-03-23", 
+                                      "2020-03-26", "2020-03-31",
+                                      "2020-04-24", "2020-04-26", 
+                                      "2020-05-11", "2020-05-18",
+                                      "2020-04-10", '2020-05-20',
+                                      '2020-04-14', '2020-05-26',
+                                      '2020-07-01', '2020-06-17',
+                                      '2020-07-04', '2020-06-20',
+                                      '2020-07-08', '2020-07-11'),
+                                    '%Y-%m-%d'), 
+                    text = c('1st case in Australia', 'PM warns of possible pandemic', 
+                             '1st community transmission. Gatherings are banned', 
+                             'Mandatory isolation for overseas travelers', 
+                             'Ruby princess outbreak', 'Stage 3 restrictions',
+                             'Stage 2 restrictions', 'Stage 1 restrictions', 
+                             'Any symptom COVID-19 testing', 'COVIDSafe app launched', 
+                             'Lowering restrictions',
+                             'First reported COVIDSafe contact tracing',
+                             'Google/Apple API announced', 'Google/Apple API launched',
+                             'COVIDSafe app announced', 
+                             'Australian human vaccine trials begin',
+                             'Stage 3 restrictions by postcode in Victoria',
+                             '2nd wave of COVID-19 begins',
+                             'Public housing lockdown in Victoria',
+                             'Restrictions tighten in Victoria',
+                             'Victorian borders are closed + Stage 1 restrictions',
+                             'Sydney Crossroads Hotel outbreak'))
+
+
+Waves = data.frame( start = as.Date( c("2020-04-06", "2020-04-15", "2020-05-07", '2020-06-23')),
+                    end   = as.Date( c("2020-04-07", "2020-04-16", "2020-05-08", '2020-06-25')),
+                    text  = c('Sample 1','Sample 2','Sample 3','Sample 4'))
+
+ft = 3.2
+p  = 15
+c  = 'sienna1'
+
+# Plot Cases & Deaths in Aus
+AusPlot = ggplot(Aus) + 
+  geom_col(aes(date, value, group = variable, fill = variable), width = .7) + PltTheme + 
+  scale_fill_manual(values = alpha(c('dodgerblue','red'), c(.4,1)),
+       labels = c('Cases','Deaths')) + 
+  scale_y_continuous( expand = c(0, 1), limits = c(0,610) ) +
+    scale_x_date(expand = c(0.0, 0), labels = date_format("%d-%b"), date_breaks = "14 days", 
+                 limits = c(START,  NOW+1)) + 
+    theme( legend.direction = 'vertical', 
+          legend.position = c(.1,.9),
+          axis.text.x = element_text(angle=45, hjust = 1)) + 
+  labs(title = 'Australian COVID-19 daily cases, deaths, and key dates', y = 'Frequency', x = 'Date', size = 14) 
+
+# Add Data collectiond dates.
+for (d in 1:nrow(Waves)){
+  AusPlot = AusPlot +
+  annotate("rect", xmin = Waves$start[d], xmax = Waves$end[d], ymin = 0, ymax = Inf, fill = 'green',  alpha = .25) +
+  annotate("text", x = Waves$start[d], y = Inf, label = Waves$text[d], angle=90, color = 'darkgreen', size=4, vjust=-.4, hjust='right', fontface = "bold")
+}
+
+AusPlot = AusPlot + annotate("rect", xmin = as.Date("2020-04-25"), xmax = as.Date("2020-04-27"), ymin = 0, ymax = Inf, fill = 'gold',  alpha = .2)
+
+AusPlot = AusPlot + annotate("rect", xmin = as.Date("2020-05-19"), xmax = as.Date("2020-05-21"), ymin = 0, ymax = Inf, fill = 'gold',  alpha = .2)
+
+# Add key dates
+for (d in 1:nrow(Dates)){
+  AusPlot = AusPlot +
+    annotate("text", x = Dates$date[d], y = p+10, label = Dates$text[d], angle=90, color = 'black', size=ft, vjust=0+.25, hjust='left', fontface = "bold") +
+    geom_segment(x = Dates$date[d], y = 2+Aus$value[(Aus$date == Dates$date[d] & Aus$variable == 'deaths')], yend = p, xend = Dates$date[d], color = 'gray10', size = 1, alpha = 0.5 )
+}
+AusPlot
+
+
+ggsave(filename = 'Figures\\Paper\\COVIDcases.pdf', plot = AusPlot, dpi = 5000, units = 'cm', height = 13, width = 27)
+
+```
+
+```{r, results = 'asis'}
+# Cleaning performed on the raw data via the custom function 'CleanTrackingData' and 'CleanCOVIDsafe' data, for Waves 1-2 and 3-4, respectively. 
+# - Output from these functions are found in OzData. 
+# - Annonymized rawdata can be found in OzData$W$RawData and annonymized processed data can be found in OzData$W$Data. 
+# - Cleaning procedure outputs for each wave are located in OzData$W$CleaningProcedure
+Cleaning = rbind( OzData$W1$CleaningProcedure, OzData$W2$CleaningProcedure, OzData$W3$CleaningProcedure, OzData$W4$CleaningProcedure)  %>% select(-RemovedDuplicate)
+colnames(Cleaning) = c('Initial Sample','Not Australian Resident','Under 18','Failed Attention Check', 'Incomplete', 'Final Sample')
+CleaningTable = kable(Cleaning, caption = 'Table 1. Participant selection procedure for data collection in waves 1-3.')
+CleaningTable
+```
+
+
+```{r}
+# Percent of sample Gender:Woman
+GenderWoman = c( Per(OzData$W1$Data$gender,2), Per(OzData$W2$Data$gender,2), Per(OzData$W3$Data$gender,2), Per(OzData$W4$Data$gender,2) )
+GenderMan = c( Per(OzData$W1$Data$gender,1), Per(OzData$W2$Data$gender,1), Per(OzData$W3$Data$gender,1), Per(OzData$W4$Data$gender,1) )
+
+# Percent of phone users
+PhoneUse = Per(rbind(W1 %>% filter(WaveN == 'Wave 2') %>% select(smartphoneuse_mildbt, mobileuse_sev) %>% rowSums(na.rm = T), W3 %>% select(smartphoneuse) ) == 1, 1)
+
+# Percent of P's COVID positive or who know someone that has been COVID+
+D = MergeWaves(W1, W3)
+CovidPos = c(sum(D$COVID_pos, na.rm=T), Per(D$COVID_pos==1,1,2) )
+CovidPosOth = c(sum(D$COVID_pos_others, na.rm=T), Per(D$COVID_pos_others==1,1,2) )
+
+```
+
+## Perceived risk from COVID-19
+```{r,fig.width = 6.5, fig.height= 4.5}
+# Figure 4. Perceived risk from COVID 19
+D = MergeWaves(W1 %>% select(Scenario, Age, Agebins, education, starts_with('COVID'), Wave, WaveN, Date ),
+               W3 %>% select(Scenario, Age, Agebins, education, starts_with('COVID'), Wave, WaveN, Date))
+
+D$Scenario = factor(D$Scenario, levels = c( 'Telecommunication', 'Bluetooth', 'Government App', 'COVIDSafe'))
+
+CoVars = gather(D %>% select(c(COVID_gen_harm,COVID_pers_harm,COVID_pers_concern,COVID_concern_oth, Scenario, WaveN)), 
+                key = 'key', value = 'value', COVID_gen_harm,COVID_pers_harm,COVID_pers_concern,COVID_concern_oth, -Scenario, -WaveN)
+
+CoVars$key = factor(CoVars$key,labels=c("General\nharm","Personal\nharm","Concern\nself","Concern\nothers"))
+MCMCd1 = MCMCoprobit(as.formula('value ~ 1 + WaveN * key'), data = CoVars, tune = 0.3, mcmc = 20000)
+MCMCs = HDIsummary(MCMCd1, levels(CoVars$WaveN), levels(CoVars$key))
+Lines = Siglines(MCMCs)
+
+
+tsize = 3.8
+Plt = ggplot(MCMCs$Means, aes(x = Factor2, y = .value, group = Factor1, fill = Factor1, color = Factor1)) + 
+  geom_errorbar(aes(ymin = .lower, ymax = .upper, x = Factor2, group = Factor1),
+                 position = position_dodge(.75), width = .5, size = 1.25, color = rep(WaveCols,each=4, alpha=1)) +
+  geom_point(size = 2, shape = 21, stroke = 0, position = position_dodge(.75), alpha = 1) + 
+  PltTheme + 
+  scale_fill_manual(values = rep('black',4) ) + PltTheme + 
+  scale_color_manual(values = WaveCols, labels = c("Sample 1", "Sample 2", "Sample 3", "Sample 4") ) +
+  ylab('Posterior means') + xlab('') +
+  scale_y_continuous(expand = c(.0, .1), breaks = 0:5, limits = c(-.8, 3.6),
+                     labels = c('0','1','2','3','4','5')) +
+  theme( legend.direction = 'horizontal',
+         legend.position = c(.47,-.27),
+         plot.margin=unit(c(0,.5,0.4,.5),"cm"),
+         legend.text=element_text(size=14, face = 'bold'),
+         legend.key.size = unit(2,"line"),
+         legend.key = element_rect(fill = "white")) + 
+  annotate('segment', x = 0.5, xend = 4.5, y = MCMCs$Cutpoints[1], yend = MCMCs$Cutpoints[1], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 4.5, y = MCMCs$Cutpoints[2], yend = MCMCs$Cutpoints[2], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 4.5, y = MCMCs$Cutpoints[3], yend = MCMCs$Cutpoints[3], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 4.5, y = MCMCs$Cutpoints[4], yend = MCMCs$Cutpoints[4], alpha = .2, linetype = 'dashed') + 
+  annotate('text', x = 4.5, y = MCMCs$Cutpoints[1] - MCMCs$Cutpoints[2]*.5, label = 'None', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 4.5, y = MCMCs$Cutpoints[1] + MCMCs$Cutpoints[2]*.5, label = 'Slight', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 4.5, y = MCMCs$Cutpoints[2] + (MCMCs$Cutpoints[3] - MCMCs$Cutpoints[2])*.5, label = 'Some', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 4.5, y = MCMCs$Cutpoints[3] + (MCMCs$Cutpoints[4] - MCMCs$Cutpoints[3])*.5, label = 'Very', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 4.5, y = MCMCs$Cutpoints[4] + (MCMCs$Cutpoints[4] - MCMCs$Cutpoints[3])*.6, label = 'Extreme', angle = 90, alpha = .5, size = tsize) + 
+  labs(title = 'Perceived risk from COVID-19') + 
+  guides(colour = guide_legend(override.aes = list(shape = 15, size = 5)))
+
+for (ii in 1:length(Lines$y)){
+  Plt = Plt + annotate('segment', x = Lines$xi[ii], xend = Lines$xe[ii], y = Lines$y[ii], yend = Lines$y[ii] )
+}
+
+ggsave(filename = 'Figures\\Paper\\COVIDRisks.pdf', plot = Plt, dpi = 5000, units = 'cm', height = 12.5, width = 18)
+Plt
+
+```
+
+
+```{r}
+# Figure 5. Perceived Benefits from Tracking Technologies
+D = MergeWaves(W1 %>% select(Scenario, starts_with('reduce'), starts_with('return'), WaveN ),
+               W3 %>% select(Scenario, starts_with('reduce'), starts_with('return'), WaveN))
+
+RedLik = gather(D %>% select( starts_with('reduce_lik'), Scenario,WaveN), -Scenario, -WaveN, key = 'key', value = 'value', factor_key = TRUE); RedLik$key = 'Reduce contraction'
+RedSpr = gather(D %>% select( starts_with('reduce_spr'), Scenario,WaveN), -Scenario, -WaveN, key = 'key', value = 'value', factor_key = TRUE); RedSpr$key = 'Reduce spread'
+RetAct = gather(D %>% select( starts_with('return'), Scenario,WaveN),     -Scenario, -WaveN, key = 'key', value = 'value', factor_key = TRUE); RetAct$key = 'Resume activities'
+D = rbind(RedLik, RedSpr, RetAct )
+D$Scenario = factor(D$Scenario, levels = c('Telecommunication', 'Bluetooth', 'Government App', 'COVIDSafe'))
+D$WaveN = factor(D$WaveN, levels = c('Wave 1', 'Wave 2', 'Wave 3','Wave 4'))
+D$key = factor(D$key, levels = c("Reduce contraction","Reduce spread", "Resume activities"))
+
+# Remove NAs
+D %<>% filter(!is.na(value))
+
+MCMCd2 = MCMCoprobit(as.formula('value ~ 1 + Scenario * key'), data = D, tune = 0.3, mcmc = 20000)
+MCMCs = HDIsummary(MCMCd2, levels(D$Scenario), levels(D$key))
+Lines = Siglines(MCMCs)
+
+tsize = 3.8
+
+
+Plt = ggplot(MCMCs$Means, aes(x = Factor2, y = .value, group = Factor1, fill = Factor1, color = Factor1)) + 
+  geom_errorbar(aes(ymin = .lower, ymax = .upper, x = Factor2, group = Factor1),
+                 position = position_dodge(.75), width = .4, size = 1.25, color = rep(PrimeCols[c(1,2,4,3)],each=3, alpha=1)) +
+  geom_point(size = 2, shape = 21, stroke = 0, position = position_dodge(.75), alpha = 1) + 
+  PltTheme + 
+  scale_fill_manual(values = rep('black',4), guide = FALSE ) + PltTheme + 
+  scale_color_manual(values = PrimeCols, labels = c("Telecommunication", "Bluetooth", "Gov App", "COVIDSafe") ) +
+  ylab('Posterior means') + xlab('') +
+  scale_y_continuous(expand = c(.0, .1), breaks = 0:5, limits = c(-.5, 3.2),
+                     labels = c('0','1','2','3','4','5')) +
+  theme( legend.direction = 'horizontal',
+         legend.position = c(.44,-.13),
+         plot.margin=unit(c(0,.5,0.5,.5),"cm"),
+         legend.text=element_text(size=14, face = 'bold'),
+         legend.key.size = unit(2,"line"),
+         legend.key = element_rect(fill = "white")) +
+  annotate('segment', x = 0.5, xend = 3.5, y = MCMCs$Cutpoints[1], yend = MCMCs$Cutpoints[1], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 3.5, y = MCMCs$Cutpoints[2], yend = MCMCs$Cutpoints[2], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 3.5, y = MCMCs$Cutpoints[3], yend = MCMCs$Cutpoints[3], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 3.5, y = MCMCs$Cutpoints[4], yend = MCMCs$Cutpoints[4], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 3.5, y = MCMCs$Cutpoints[5], yend = MCMCs$Cutpoints[5], alpha = .2, linetype = 'dashed') + 
+  annotate('text', x = 3.5, y = MCMCs$Cutpoints[1] - MCMCs$Cutpoints[2]*.5, label = 'None', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 3.5, y = MCMCs$Cutpoints[1] + MCMCs$Cutpoints[2]*.5, label = 'Slight', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 3.5, y = MCMCs$Cutpoints[2] + (MCMCs$Cutpoints[3] - MCMCs$Cutpoints[2])*.5, label = 'A bit', angle = 90, alpha = .5, size = tsize) + 
+    annotate('text', x = 3.5, y = MCMCs$Cutpoints[3] + (MCMCs$Cutpoints[4] - MCMCs$Cutpoints[3])*.5, label = 'Mod', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 3.5, y = MCMCs$Cutpoints[4] + (MCMCs$Cutpoints[5] - MCMCs$Cutpoints[4])*.5, label = 'A lot', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 3.5, y = MCMCs$Cutpoints[5] + (MCMCs$Cutpoints[5] - MCMCs$Cutpoints[4])*.5, label = 'Extr', angle = 90, alpha = .5, size = tsize) + 
+  labs(title = 'Perceived benefits of tracking technologies') + 
+  guides(colour = guide_legend(override.aes = list(shape = 15, size = 5)))
+
+for (ii in 1:length(Lines$y)){
+  Plt = Plt + annotate('segment', x = Lines$xi[ii], xend = Lines$xe[ii], y = Lines$y[ii], yend = Lines$y[ii] )
+}
+
+ggsave(filename = 'Figures\\Paper\\TrackingBenefits.pdf', plot = Plt, dpi = 5000, units = 'cm', height = 12.5, width = 18)
+Plt
+
+
+```
+
+
+```{r,fig.width = 9, fig.height= 6}
+# Figure 6. Perceived Risks from Tracking Technologies
+D = MergeWaves(W1 %>% select(Scenario, starts_with('ability'), starts_with('decline'), starts_with('proport'), starts_with('sens'),
+                             starts_with('risk_of'), starts_with('trust_'), starts_with('data_sec'), starts_with('ongo'), WaveN ),
+               W3 %>% select(Scenario, starts_with('ability'), starts_with('decline'), starts_with('proport'), starts_with('sens'),
+                             starts_with('risk_of'), starts_with('trust_'), starts_with('data_sec'), starts_with('ongo'), WaveN ))
+
+D2 = gather(D %>% select( starts_with('decline'), Scenario), -Scenario,key = 'key',value = 'value', factor_key = TRUE); D2$key = 'Difficult\nDecline'
+D3 = gather(D %>% select( starts_with('prop'), Scenario), -Scenario,key = 'key',value = 'value', factor_key = TRUE); D3$key = 'Necessary\nData'
+D4 = gather(D %>% select( starts_with('sens'), Scenario), -Scenario,key = 'key',value = 'value', factor_key = TRUE); D4$key = 'Sensitive\nData'
+D5 = gather(D %>% select( starts_with('risk'), Scenario), -Scenario,key = 'key',value = 'value', factor_key = TRUE); D5$key = 'Risk'
+D6 = gather(D %>% select( starts_with('trust_intent'), Scenario), -Scenario,key = 'key',value = 'value', factor_key = TRUE); D6$key = 'Trust\nIntentions'
+D7 = gather(D %>% select( starts_with('trust_respec'), Scenario), -Scenario,key = 'key',value = 'value', factor_key = TRUE); D7$key = 'Trust\nPrivacy'
+D8 = gather(D %>% select( starts_with('data_sec'), Scenario), -Scenario,key = 'key',value = 'value', factor_key = TRUE); D8$key = 'Data\nSecurity'
+D9 = gather(D %>% select( starts_with('ongo'), Scenario), -Scenario,key = 'key',value = 'value', factor_key = TRUE); D9$key = 'Ongoing\nControl'
+
+D = rbind(D2, D3, D4, D5, D6, D7, D8, D9)
+D$Scenario = factor(D$Scenario, levels = c('Telecommunication', 'Bluetooth', 'Government App', 'COVIDSafe'))
+D$key = factor(D$key, levels = c('Difficult\nDecline', 'Necessary\nData', 'Sensitive\nData', 'Trust\nIntentions', 'Trust\nPrivacy', 'Data\nSecurity','Risk', 'Ongoing\nControl'))
+D %<>% filter(!is.na(value))
+
+MCMCd3 = MCMCoprobit(as.formula('value ~ 1 + Scenario * key'), data = D, tune = 0.3, mcmc = 20000)
+MCMCs = HDIsummary(MCMCd3, levels(D$Scenario), levels(D$key))
+Lines = Siglines(MCMCs)
+
+tsize = 3.8
+Plt = ggplot(MCMCs$Means, aes(x = Factor2, y = .value, group = Factor1, fill = Factor1, color = Factor1)) + 
+  geom_errorbar(aes(ymin = .lower, ymax = .upper, x = Factor2, group = Factor1),
+                 position = position_dodge(.75), width = .5, size = 1.25, color = rep(PrimeCols[c(1,2,4,3)],each=8, alpha=1)) +
+  geom_point(size = 2, shape = 21, stroke = 0, position = position_dodge(.75), alpha = 1) + 
+  PltTheme + 
+  scale_fill_manual(values = rep('black',4), guide = FALSE ) + PltTheme + 
+  scale_color_manual(values = PrimeCols, labels = c("Telecommunication", "Bluetooth", "Gov App", "COVIDSafe") ) +
+  ylab('Posterior means') + xlab('') +
+  scale_y_continuous(expand = c(.0, .1), breaks = 0:5, limits = c(-.5, 2.7),
+                     labels = c('0','1','2','3','4','5')) +
+  theme( legend.direction = 'horizontal',
+         legend.position = c(.47,-.2),
+         plot.margin=unit(c(0,.5,0.8,.5),"cm"),
+         legend.text=element_text(size=14, face = 'bold'),
+         legend.key.size = unit(2,"line"),
+         legend.key = element_rect(fill = "white")) +
+  annotate('segment', x = 0.5, xend = 8.5, y = MCMCs$Cutpoints[1], yend = MCMCs$Cutpoints[1], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 8.5, y = MCMCs$Cutpoints[2], yend = MCMCs$Cutpoints[2], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 8.5, y = MCMCs$Cutpoints[3], yend = MCMCs$Cutpoints[3], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 8.5, y = MCMCs$Cutpoints[4], yend = MCMCs$Cutpoints[4], alpha = .2, linetype = 'dashed') + 
+  annotate('segment', x = 0.5, xend = 8.5, y = MCMCs$Cutpoints[5], yend = MCMCs$Cutpoints[5], alpha = .2, linetype = 'dashed') + 
+  annotate('text', x = 8.5, y = MCMCs$Cutpoints[1] - MCMCs$Cutpoints[2]*.5, label = 'None', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 8.5, y = MCMCs$Cutpoints[1] + MCMCs$Cutpoints[2]*.5, label = 'Slight', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 8.5, y = MCMCs$Cutpoints[2] + (MCMCs$Cutpoints[3] - MCMCs$Cutpoints[2])*.5, label = 'A bit', angle = 90, alpha = .5, size = tsize) + 
+    annotate('text', x = 8.5, y = MCMCs$Cutpoints[3] + (MCMCs$Cutpoints[4] - MCMCs$Cutpoints[3])*.5, label = 'Mod', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 8.5, y = MCMCs$Cutpoints[4] + (MCMCs$Cutpoints[5] - MCMCs$Cutpoints[4])*.5, label = 'A lot', angle = 90, alpha = .5, size = tsize) + 
+  annotate('text', x = 8.5, y = MCMCs$Cutpoints[5] + (MCMCs$Cutpoints[5] - MCMCs$Cutpoints[4])*.5, label = 'Extr', angle = 90, alpha = .5, size = tsize) + 
+  labs(title = 'Perceived risks of tracking technologies') + 
+  guides(colour = guide_legend(override.aes = list(shape = 15, size = 5)))
+
+for (ii in 1:length(Lines$y)){
+  Plt = Plt + annotate('segment', x = Lines$xi[ii], xend = Lines$xe[ii], y = Lines$y[ii], yend = Lines$y[ii] )
+}
+
+ggsave(filename = 'Figures\\Paper\\TrackingRisks.pdf', plot = Plt, dpi = 5000, units = 'cm', height = 13.5, width = 21)
+Plt
+
+
+```
+
+
+```{r, fig.width=8, fig.height= 6}
+# Figure 7. Acceptability for Tracking in each Scenario and COVIDSafe Downloads
+D = MergeWaves( W1 %>% select(starts_with('bluetooth_uptake2'), starts_with('app_uptake2'), starts_with('is_acceptable2'),
+                              starts_with('change'), ),
+               W3 %>% select(CS_downloaded, CS_dload_future, CS_dload_if_leg))
+
+# Add values across 
+D[D == 2] = 0
+
+D %<>% select( is_acceptable2_sev, change_sunset_sev, change_optout_sev, 
+              bluetooth_uptake2_bt, change_sunset_bt, 
+              app_uptake2_mild, change_sunset_mild, change_dlocal_mild,
+              CS_downloaded, CS_dload_if_leg, CS_dload_future) 
+
+S = apply(D, 2, sd, na.rm=T)
+N = apply(!(is.na(D)), 2, sum, na.rm=T)
+
+# Count all individuals, not just the added participants...
+N[2] = N[1]; N[3] = N[1]; N[5] = N[4]
+N[7] = N[6]; N[8] = N[6]
+
+# Summ all accepts and add
+#   non-cnd accepts to cnd accepts
+D %<>%  colSums( na.rm = T )
+D[2] = (D[1] + D[2])  
+D[3] = (D[1] + D[3])  
+D[5] = (D[4] + D[5])  
+D[7] = (D[6] + D[7])  
+D[8] = (D[6] + D[8])  
+D[10] = (D[9] + D[10]) 
+D[11] = (D[9] + D[11]) 
+
+AllN = c(OzData$N_Telco, OzData$N_Telco, OzData$N_Telco, 
+         OzData$N_Goog, OzData$N_Goog, 
+         OzData$N_GovA, OzData$N_GovA, OzData$N_GovA,
+         OzData$N_CoV, OzData$N_CoV, OzData$N_CoV)
+
+
+# Do prop tests to get CIs
+CI = matrix(0, length(D), 2)
+for (ii in 1:length(D)){
+  x = bayes.prop.test(D[ii], AllN[ii], n.iter = 20000)
+  CI[ii,1] = x$stats[1,5]
+  CI[ii,2] = x$stats[1,6]
+}
+CI = CI * 100
+
+D = D / AllN * 100
+
+d = gather( as.data.frame(t(D)) )
+d$Scenario = c('Telecommunication','Telecommunication','Telecommunication','Bluetooth','Bluetooth',
+                         'Government App','Government App','Government App', 'COVIDSafe','COVIDSafe','COVIDSafe')
+d$key = c('Accept','Sunset', 'Opt Out', 'Accept', 'Sunset', 'Accept', 'Sunset','Local Storage', 'Downloaded', 'Legislation', 'In Future')
+d$y   = rep(0,11)
+i = .025
+
+d$X   = c(.1-i, .1, .1+i, 2, 2+i, 3-i, 3, 3+i, 4-i, 4, 4+i)
+
+d$Scenario = factor(d$Scenario, levels = c('Telecommunication', 'Bluetooth', 'Government App', 'COVIDSafe'))
+d$key = factor(d$key, levels = c('Accept', 'Sunset', 'Opt Out', 'Local Storage', 'Downloaded', 'Legislation', 'In Future'))
+d$color = c(1,.6,.4,1,.6,1,.6,.4,1,.6,.4)
+
+d$X   = c(.05, .12, .19, .31, .41, .53, .6, .67, .77, .84, .92) + 0.02
+d$Se = S / sqrt(N) * 100
+
+d$CIlow = CI[,1]
+d$CIhigh = CI[,2]
+
+
+Plt = ggplot(d) + 
+  geom_col(aes(y = value, x = Scenario, group = key, fill = Scenario),  alpha = d$color,
+           position = 'dodge', col = 'black') + 
+  geom_errorbar( aes(y = value, x = Scenario, group = key, fill = Scenario, ymin=CIlow, ymax=CIhigh), width=.2, position=position_dodge(.9)) +
+  scale_fill_manual(values = PrimeCols ) + 
+  PltTheme + 
+  scale_y_continuous( expand = c(0, 0), limits = c(0,100) ) + 
+  labs(title = 'Tracking acceptability and usage', y = 'Percent (%)', x = '') +
+  theme( legend.direction = 'vertical', 
+         plot.title = element_text(size = 14),
+         axis.title = element_text(size=14),
+         legend.key = element_rect(fill = "white"),
+         #legend.position = c(.7,.94),
+         legend.position = c(.5,-.32), 
+         legend.text=element_text(size=12, face = 'bold'),
+         #plot.margin=unit(c(0,0,1.7,0),"cm"),
+         plot.margin=unit(c(0,0,2.5,0),"cm"),
+         axis.text.x = element_text(angle=45, hjust = 1, color = 'white',size=0)) +
+  guides(fill=guide_legend(ncol=4))
+
+# Add significance
+o = .3
+SigLines = data.frame( xi = c(1-o, 1-o, 1,      3-o, 3-o,     4-o, 4), 
+                       xe = c(1, 1+o, 1+o,      3, 3+o,       4+o, 4+o), 
+                       y  = c(94.5, 96.75, 99,  86.7, 88.95,  66.1, 68.35))
+###  Sig Lines - made manually ##
+for (ii in 1:nrow(SigLines)){
+  Plt = Plt + annotate('segment', x = SigLines$xi[ii], xend = SigLines$xe[ii], y = SigLines$y[ii], yend = SigLines$y[ii] )
+}
+
+for (p in 1:11){
+  Plt = Plt + annotation_custom(grob = textGrob(d$key[p], x = d$X[p], y = -.04, rot = 45, just = 1, gp = gpar(fontsize = 12) ))
+}
+
+gt <- ggplot_gtable(ggplot_build(Plt))
+gt$layout$clip[gt$layout$name == "panel"] <- "off"
+grid.arrange(gt)
+
+ggsave(filename = 'Figures\\Paper\\TrackingAcceptability.pdf', plot = gt, dpi = 500, units = 'cm', height = 12, width = 18)
+
+```
+
+```{r, fig.width=7, fig.height= 5}
+# Figure 8. Acceptability for tracking technologies by date of data collection.
+D = MergeWaves( W1 %>% select(starts_with('bluetooth_uptake2'), starts_with('app_uptake2'), starts_with('is_acceptable2'), starts_with('change'), Date),
+               W3 %>% select(CS_downloaded, CS_dload_future, CS_dload_if_leg, Date))
+
+# Add values across 
+D[D == 2] = 0
+
+COVIDSafeDL = D %>% select(Date, CS_downloaded)
+COVIDSafeDL = aggregate(COVIDSafeDL[, 2], list(COVIDSafeDL$Date), sum, na.rm=T) %>% filter(x > 0)
+COVIDSafeDL$Group.1 = as.Date(COVIDSafeDL$Group.1, format = '%d-%m-%Y')
+
+x = bayes.prop.test(COVIDSafeDL$x[1], OzData$W3$CleaningProcedure$RemainingPs, n.iter = 20000)
+CSlow = NA; CShigh = NA
+CSlow[1] = x$stats[1,5]
+CShigh[1] = x$stats[1,6]
+
+x = bayes.prop.test(COVIDSafeDL$x[2], OzData$W4$CleaningProcedure$RemainingPs, n.iter = 20000)
+CSlow[2] = x$stats[1,5]
+CShigh[2] = x$stats[1,6]
+
+COVIDSafeDL$x = COVIDSafeDL$x / c(OzData$W3$CleaningProcedure$RemainingPs, OzData$W4$CleaningProcedure$RemainingPs) * 100
+
+D$CS_downloaded[D$CS_dload_future == 1] = 1
+
+D %<>% select( is_acceptable2_sev, 
+              bluetooth_uptake2_bt,
+              app_uptake2_mild,
+              CS_downloaded,  Date) 
+
+d = aggregate(D[, 1:4], list(D$Date), sum, na.rm=T) %>% gather(key, value, -Group.1) %>% filter(value > 0)
+z = aggregate(!is.na(D[, 1:4]), list(D$Date), sum, na.rm=T) %>% gather(key, value, -Group.1) %>% filter(value > 0)
+CIlow = z$value; CIhigh = CIlow
+for (ii in 1:nrow(z)){
+  x = bayes.prop.test(d$value[ii], z$value[ii], n.iter = 20000)
+  CIlow[ii] = x$stats[1,5] * 100
+  CIhigh[ii] = x$stats[1,6] * 100
+}
+
+d = aggregate(D[, 1:4], list(D$Date), mean, na.rm=T)
+colnames(d) = c('Date', 'Telecommunication', 'Bluetooth', 'Government App', 'COVIDSafe')
+d = gather(d, key, value, 'Telecommunication', 'Bluetooth', 'Government App', 'COVIDSafe', -Date)
+d = d[!is.nan(d$value),]
+d$Date = as.Date(d$Date, format = '%d-%m-%Y')
+d$key = factor(d$key, levels = c('Telecommunication', 'Bluetooth', 'Government App', 'COVIDSafe'))
+d$value = d$value * 100
+d$CIlow = CIlow
+d$CIhigh = CIhigh
+
+Plt = ggplot(d) + 
+  geom_col(aes(y = value, x = Date, group = key, fill = key), position = 'dodge', col = 'black') +
+  geom_errorbar( aes(y = value, x = Date, group = key, ymin=CIlow, ymax=CIhigh), width=3, position=position_dodge(8)) +
+  geom_segment(aes(x = COVIDSafeDL$Group.1[1]-4, xend = COVIDSafeDL$Group.1[1]+4, y = COVIDSafeDL$x[1], yend = COVIDSafeDL$x[1]), size = 1, linetype='dashed') + 
+  geom_segment(aes(x = COVIDSafeDL$Group.1[2]-4, xend = COVIDSafeDL$Group.1[2]+4, y = COVIDSafeDL$x[2], yend = COVIDSafeDL$x[2]), size = 1, linetype='dashed') + 
+  scale_fill_manual(values = PrimeCols ) + 
+  PltTheme + 
+  scale_y_continuous( expand = c(0, 0), limits = c(0,85) ) + 
+  labs(title = 'Tracking acceptability and future intentions', y = 'Percent (%)', x = 'Collection Date') +
+  theme( legend.direction = 'vertical', 
+         plot.title = element_text(size = 14),
+         axis.title = element_text(size=14),
+         legend.key = element_rect(fill = "white"),
+         legend.position = c(.8,.88), 
+         legend.text = element_text(size = 14),
+         plot.margin=unit(c(0,0,0,0),"cm")) + 
+  xlim( min(d$Date)-6, max(d$Date)+6 )
+Plt
+
+ggsave(filename = 'Figures\\Paper\\TrackingAcceptability_dates.pdf', plot = Plt, dpi = 500, units = 'cm', height = 12, width = 18)
+
+```
+
+
+```{r}
+# Figure 9. Perceived COVIDSafe Tracking Technology
+d = data.frame( Downloaded = c('No','No','No','No','z','Yes','Yes','Yes','Yes','z'), 
+                 Technology = c('Bluetooth','Location','Telecommunication','Do not know','z','Bluetooth','Location','Telecommunication','Do not know','z'), 
+                 Counts = cro_cases(W3$CS_knowledge_tech, row_vars=W3$CS_downloaded) ) %>% filter(Downloaded != 'z')
+
+CI = matrix(0, nrow(d), 2)
+for (ii in 1:nrow(d)){
+  x = bayes.prop.test(d$Counts..Total[ii], sum(d$Counts..Total[d$Downloaded == d$Downloaded[ii]]), n.iter = 20000)
+  CI[ii,1] = x$stats[1,5]
+  CI[ii,2] = x$stats[1,6]
+}
+CI = CI * 100
+
+x = cro_tpct(W3$CS_knowledge_tech, row_vars=W3$CS_downloaded) %>% set_caption("App Tracking Technology By App Uptake: Percentages") %>% rename(Percent = `#Total`)
+
+df = data.frame( Downloaded = c('No','No','No','No','z','Yes','Yes','Yes','Yes','z'), 
+                 Technology = c('Bluetooth','Location','Telecommunication','Do not know','z','Bluetooth','Location','Telecommunication','Do not know','z'), 
+                 Percent = x$Percent) %>% filter(Downloaded != 'z')
+df$CIlow = CI[,1]
+df$CIhigh = CI[,2]
+
+Plt = ggplot(df, aes(Downloaded, Percent)) +   
+  geom_bar(aes(fill = Technology), position = "dodge", stat="identity", col='Black') + 
+  geom_errorbar( aes(y = Percent, x = Downloaded, fill = Technology, ymin=CIlow, ymax=CIhigh), width=.2, position=position_dodge(.9)) +
+  scale_fill_manual(values = Cblind[5:8]) + PltTheme  +
+  labs(title = 'Perceived COVIDSafe tracking technology', x = 'COVIDSafe Downloaded', y = 'Percent (%)') + 
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 85)) + 
+  theme( legend.position = c(.17,.85)) 
+
+# Add significance
+io = .34
+oi = .11
+SigLines = data.frame( xi = c(1-io, 1-io,1-io, 1-oi, 1+oi,  2-io, 2-io, 2-io, 2-oi, 2+oi), 
+                       xe = c(1-oi, 1+oi,1+io, 1+io, 1+io,  2-oi, 2+oi, 2+io, 2+oi, 2+io), 
+                       y  = c(46, 47, 48, 49, 50,           78, 79, 80, 81, 82))
+
+
+# COMMENTED OUT SIG LINES FOR PAPER - DIFFERENCES WERE VERY CLEAR ANYWAY...
+###  Sig Lines - made manually ##
+# for (ii in 1:nrow(SigLines)){
+#   Plt = Plt + annotate('segment', x = SigLines$xi[ii], xend = SigLines$xe[ii], y = SigLines$y[ii], yend = SigLines$y[ii] )
+# }
+
+ggsave(filename = 'Figures\\Paper\\COVIDSafeTech.pdf', plot = Plt, dpi = 500, units = 'cm', height = 14, width = 20)
+Plt
+
+
+```
+
+
+```{r}
+# Supplementary Materials: Figure S1: Why did you Download COVIDSafe
+Cnames = c('Activities','Self Health','Others Health','Gov Policy','Economy')
+WhyDL = RankOrder(W3, 'CS_dload_why', Cnames, 1, 'Why did you download COVIDSafe?', 3.2, 9, 9)
+WhyDL$PDF = WhyDL$PDF + theme(legend.position = c(1.15,.5), plot.margin=unit(c(0.1,2,0.1,0.1),"cm"), 
+                  legend.text=element_text(size=8, face = 'bold'))
+
+ggsave(filename = 'Figures\\Paper\\COVIDSafeDLwhy.pdf', plot = WhyDL$PDF, dpi = 500, units = 'cm', height = 9, width = 12)
+WhyDL$PDF
+```
+
+```{r, fig.height=4, fig.width=10}
+# Supplementary Materials: Figure S2: Who convinced you to download COVIDSafe
+DLwho = RankOrder(W3, 'CS_dload_who', c('Prime Minister','Other Politician','Government Advertising',
+            'Friend or Family','Other Public Figure', 'Scientist', 'Did not need convincing'), 
+          1, 'Who convinced you to download COVIDSafe?', 3.2, 9, 9)
+
+D = W3 %>% filter(CS_dload_future == 0, CS_downloaded == 0)
+Cnames = c('Prime Minister','Other Politician','Government Advertising',
+            'Friend or Family','Other Public Figure', 'Scientist', 'Did not need convincing')
+WhoNo = RankOrder(D, 'CS_notdload_who', Cnames, 1, 'Who convinced you not to download COVIDSafe?', 3.2, 9, 9)
+
+DLplot = ggarrange(DLwho$PDF, WhoNo$PDF, ncol = 2, nrow = 1, labels = c('a)','b)'),common.legend = F)
+
+ggsave(filename = 'Figures\\Paper\\COVIDSafeDLwho.pdf', plot = DLplot, dpi = 500, units = 'cm', height = 11, width = 26)
+DLplot
+```
+
+```{r, fig.height=8, fig.width=11}
+# Supplementary Materials: Figure S3: Why have you not/will you not download COVIDSafe?
+D = OzData$W3$Data %>% filter(CS_dload_future == 1, CS_downloaded == 0)
+
+Cnames = c('Time','Not left the house','Tech Issues',
+            'Waiting on others','Considering Pros & Cons', 
+            'Not considered it', 'Waiting on legislation',
+            'Not know how')
+NotYet1 = RankOrder(D, 'CS_why_no_dl_yet', Cnames, 1, 'Why have you not yet downloaded COVIDSafe?', 3.2, 11, 10)
+
+D = OzData$W4$Data %>% filter(CS_dload_future == 1, CS_downloaded == 0)
+Cnames = c('Time','Not left the house','Tech Issues',
+            'Waiting on others','Considering Pros & Cons', 
+            'Not considered it', 'Not know how')
+NotYet2 = RankOrder(D, 'CS_why_no_dl_yet', Cnames, 1, 'Why have you not yet downloaded COVIDSafe?', 3.2, 11, 10)
+
+# WHY - Will not in future
+D = OzData$W3$Data %>% filter(CS_dload_future == 0, CS_downloaded == 0)
+
+Cnames = c('Privacy','Gov Trust','Battery Usage',
+            'Non-Effective','Normalising Gov Tracking', 
+            'Civil liberties', 'Not know how')
+WhyNeverW3 = RankOrder(D, 'CS_notdload_why', Cnames, 1, 'Why will you not download the app in future?', 3.2, 11, 10)
+
+D = OzData$W4$Data %>% filter(CS_dload_future == 0, CS_downloaded == 0)
+
+Cnames = c('Privacy','Gov Trust','Battery Usage',
+            'Non-Effective','Normalising Gov Tracking', 
+            'Civil liberties', 'Not know how',
+            "Don't own S.Phone", "Phone too old",
+            "Concern: 3rd party access")
+WhyNeverW4 = RankOrder(D, 'CS_notdload_why', Cnames, 1, 'Why will you not download the app in future?', 2.8, 11, 10)
+
+NotYet1$PDF = NotYet1$PDF + xlab("")
+NotYet2$PDF = NotYet2$PDF + xlab("")
+
+CSplot = ggarrange(NotYet1$PDF, NotYet2$PDF, WhyNeverW3$PDF, WhyNeverW4$PDF, ncol = 2, nrow = 2, labels = c('a)','b)', 'c)', 'd)'),common.legend = F)
+
+ggsave(filename = 'Figures\\Paper\\COVIDSafeNotDL.pdf', plot = CSplot, dpi = 500, units = 'cm', height = 8.5*2.5, width = 11.5*2.5)
+CSplot
+```
+
+
+```{r}
+# Phone Operating Systems used in Wave 4 
+D = OzData$W4$Data %>% filter(CS_downloaded == 1)
+Ios = D$CS_appopen_iOS[!is.na(D$CS_appopen_iOS)]
+
+D = OzData$W4$Data %>% filter(smartphoneuse == 1)
+Phone = data.frame(V = 'Percent - All Users')
+Phone$Android = Per(D$smarpthone_os,1)
+Phone$Apple = Per(D$smarpthone_os,2)
+Phone$Other = Per(D$smarpthone_os,3,2)
+Phone$Unknown = Per(D$smarpthone_os,4,2)
+
+Phone
+```
+
+```{r}
+# Wave 4: When Covidsafe was first downloaded
+When = data.frame(V='Percent - COVIDSafe Downloaded')
+When$DayOf = Per(D$CS_when_dl, 1)
+When$WeekOf = Per(D$CS_when_dl, 2)
+When$AnyTime = Per(D$CS_when_dl, 3)
+
+When
+```
+
+
+```{r}
+# Assessnent of the effective usage rate of COVIDSafe
+Eff = OzData$W4$Data %>% filter(CS_downloaded == 1, CS_appopen_iOS %in% c(1, NA), CS_working %in% c(1,2)) %>% select(CS_downloaded, CS_appopen_iOS, CS_working) %>% nrow
+Eff = round(Eff / sum(OzData$W4$Data$CS_downloaded) * 100)
+
+print(paste0('Apple IoS Users who leave their phone screen unlocked, Bluetooth on, and COVIDSafe open on the front screen when in public: ', Per(Ios, 1),'%'))
+
+print(paste0('Given this, we would estimate that effective usage of COVIDSafe app across all devicides prior to the iOS patch to be approximately: ', Eff,'%'))
+```
+
+
+```{r}
+# COVIDSafe usage varaibles: Registered, Install, Bluetooth On (and when), If they will upload their data should they test positive with COVID, if they have tried to share COVIDSafe, and if they have tried to share the app with the inbuilt functionality.
+D = W3 %>% filter(CS_downloaded == 1)
+Registered = Per(D$CS_registered, 1)
+Installed = Per(D$CS_installed, 1)
+BTonAlways = Per(D$CS_bt_gen, 1)
+BTonPublic = Per(D$CS_bt_gen, 2)
+BTonNo     = Per(D$CS_bt_gen, 0)
+BTonUnknown = Per(D$CS_bt_gen, 3)
+
+AllCnds = Per(D$CS_working, 1)
+AllCndsPublic = Per(D$CS_working, 2)
+AllCndsNo = Per(D$CS_working, 0)
+AllCndsUnknown = Per(D$CS_working, 3)
+
+WillUpload = Per(D$CS_upload_data, 1)
+Shared = Per(D$CS_convince_oth, 1)
+
+D = OzData$W4$Data %>% filter(CS_downloaded == 1)
+  
+InbuiltKnown = Per(D$CS_share_know_1,1)
+InbuiltUsed = Per(D$CS_share_know_2,1)
+InbuiltIntend = Per(D$CS_share_know_3,1)
+
+
+```
+
